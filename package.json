@@ -10,7 +10,7 @@
     "lib": "lib"
   },
   "scripts": {
-    "tsc": "tsc",
+    "tsc": "tsc --p ./tsconfig.json",
     "preinstall": "npm run tsc",
     "prepublishOnly": "npm run tsc"
   },
