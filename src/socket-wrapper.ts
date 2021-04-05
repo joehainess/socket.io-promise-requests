@@ -1,6 +1,6 @@
 import { Payloads, Responses } from '../types/requests';
 
-type RequestNames = keyof Payloads | keyof Responses | string;
+type RequestNames = keyof Payloads | keyof Responses;
 
 type PayloadData<T extends RequestNames> = T extends keyof Payloads ? Payloads[T] : any;
 type ResponseData<T extends RequestNames> = T extends keyof Responses ? Responses[T] : any;
@@ -66,7 +66,7 @@ export default (socket: SocketIO.Socket | SocketIOClient.Socket) => {
   })
 
   // Server attaching request listeners
-  const attachedListeners: Map<RequestNames, RequestListener<RequestNames>> = new Map();
+  const attachedListeners: Map<RequestNames, RequestListener<RequestNames>> = new Map<RequestNames, RequestListener<RequestNames>>();
   function listen <T extends RequestNames>(requestName: T, listener: RequestListener<T>) {
     attachedListeners.set(requestName, listener);
   }
