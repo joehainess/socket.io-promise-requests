@@ -11,7 +11,7 @@
   },
   "scripts": {
     "tsc": "tsc --p ./tsconfig.json",
-    "preinstall": "npm run tsc",
+    "postinstall": "npm run tsc",
     "prepublishOnly": "npm run tsc"
   },
   "repository": {
