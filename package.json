@@ -4,11 +4,9 @@
   "description": "",
   "main": "./lib/index.js",
   "files": [
-    "lib/"
+    "lib/",
+    "types/"
   ],
-  "directories": {
-    "lib": "lib"
-  },
   "scripts": {
     "tsc": "tsc --p ./tsconfig.json",
     "prepublishOnly": "npm run tsc"
