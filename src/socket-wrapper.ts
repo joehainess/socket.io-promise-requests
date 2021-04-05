@@ -1,4 +1,5 @@
 import { Payloads, Responses } from '../types/requests';
+import { Socket } from 'socket.io';
 
 type RequestNames = keyof Payloads | keyof Responses;
 
@@ -18,7 +19,7 @@ interface ResponseObject<T extends RequestNames> {
   data: ResponseData<T>
 }
 
-export default (socket: SocketIO.Socket | SocketIOClient.Socket) => {
+export default (socket: SocketIO.Socket | SocketIOClient.Socket | Socket) => {
 
   const getUniqueRequestId = (): string => {
 
@@ -38,15 +39,21 @@ export default (socket: SocketIO.Socket | SocketIOClient.Socket) => {
   }
   
   // Client making requests
-  const requestMap: Map<string, (reponse: ResponseData<RequestNames>) => void> = new Map();
-  function request <T extends RequestNames>(requestName: T, payload: PayloadData<T>): Promise<ResponseData<T>> {
+  const requestMap: Map<string, (data: ResponseData<RequestNames>) => void> = new Map();
+  function request <T extends RequestNames>(requestName: T, payload: PayloadData<T>, callback?: (response: ResponseData<T>) => void): Promise<ResponseData<T>> {
 
     const uniqueId: string = getUniqueRequestId();
     
+    // Extract promise resolve function
     let resolveRequest: (reponse: ResponseData<T>) => void;
     const promise: Promise<ResponseData<T>> = new Promise(resolve => resolveRequest = resolve);
-    // @ts-ignore
-    requestMap.set(uniqueId, resolveRequest);
+
+    const responseCallback = (data: ResponseData<T>) => {
+      resolveRequest(data); // Resolve promise
+      if (callback) callback(data);
+      else requestMap.delete(uniqueId) // If there's no callback, it resolves the promise once and deletes the request
+    }
+    requestMap.set(uniqueId, responseCallback);
 
     const requestObject: RequestObject<T> = { requestName: requestName, id: uniqueId, payload: payload };
     socket.emit('request', requestObject);
@@ -57,10 +64,9 @@ export default (socket: SocketIO.Socket | SocketIOClient.Socket) => {
   // Client listening to responses
   socket.on('response', (responseObject: ResponseObject<RequestNames>) => {
     if (requestMap.has(responseObject.id)) {
-      const resolveRequest = requestMap.get(responseObject.id);
-      if (resolveRequest) {
-        resolveRequest(responseObject.data);
-        requestMap.delete(responseObject.id);
+      const responseCallback = requestMap.get(responseObject.id);
+      if (responseCallback) {
+        responseCallback(responseObject.data);
       }
     }
   })
