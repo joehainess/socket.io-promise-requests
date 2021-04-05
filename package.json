@@ -1,0 +1,36 @@
+{
+  "name": "socket.io-promise-requests",
+  "version": "0.0.0",
+  "description": "",
+  "main": "./lib/index.js",
+  "files": [
+    "lib/"
+  ],
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "tsc": "tsc",
+    "preinstall": "npm run tsc",
+    "prepublishOnly": "npm run tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Majorblake/socket.io-promise-requests.git"
+  },
+  "author": "Majorblake",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Majorblake/socket.io-promise-requests/issues"
+  },
+  "homepage": "https://github.com/Majorblake/socket.io-promise-requests#readme",
+  "dependencies": {
+    "@types/socket.io": "^2.1.13",
+    "@types/socket.io-client": "^1.4.36",
+    "socket.io": "^4.0.1",
+    "socket.io-client": "^4.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^4.2.3"
+  }
+}
