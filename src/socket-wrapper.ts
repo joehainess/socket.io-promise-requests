@@ -3,15 +3,17 @@ import { Socket } from 'socket.io';
 
 type RequestNames = keyof Payloads | keyof Responses;
 
-type PayloadData<T extends RequestNames> = T extends keyof Payloads ? Payloads[T] : any;
+type PayloadData<T extends RequestNames> = T extends keyof Payloads ? [ Payloads[T] ] : [ any? ];
 type ResponseData<T extends RequestNames> = T extends keyof Responses ? Responses[T] : any;
 
-type RequestListener<T extends RequestNames> = (payload: PayloadData<T>, send: (response: ResponseData<T>) => void) => void;
+type RequestListener<T extends RequestNames> = (payload: PayloadData<T>[0], send: (response: ResponseData<T>) => void) => void;
+
+type CallbackFunction<T extends RequestNames> = (response: ResponseData<T>) => void;
 
 interface RequestObject<T extends RequestNames> {
   requestName: T
   id: string
-  payload: PayloadData<RequestNames>
+  payload: PayloadData<T>
 }
 
 interface ResponseObject<T extends RequestNames> {
@@ -40,7 +42,16 @@ export default (socket: SocketIO.Socket | SocketIOClient.Socket | Socket) => {
   
   // Client making requests
   const requestMap: Map<string, (data: ResponseData<RequestNames>) => void> = new Map();
-  function request <T extends RequestNames>(requestName: T, payload: PayloadData<T>, callback?: (response: ResponseData<T>) => void): Promise<ResponseData<T>> {
+  function request <T extends RequestNames>(requestName: T, payload: PayloadData<T>[0], callback: CallbackFunction<T>): Promise<ResponseData<T>> // args length will be exactly 2
+  function request <T extends RequestNames>(requestName: T, ...payload: PayloadData<T>): Promise<ResponseData<T>> // spread is used to cheat optional params, but args length will be 1 as PayloadData is a tuple of length 1
+  function request <T extends RequestNames>(requestName: T, ...args: PayloadData<T> | [ PayloadData<T>[0], CallbackFunction<T> ]): Promise<ResponseData<T>> {
+
+    let payload: PayloadData<T>[0], callback: CallbackFunction<T>;
+    if (args.length === 2) {
+      payload = args[0];
+      callback = args[1];
+    }
+    else payload = args[0]
 
     const uniqueId: string = getUniqueRequestId();
     
