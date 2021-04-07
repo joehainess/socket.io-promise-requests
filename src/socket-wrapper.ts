@@ -84,6 +84,8 @@ export default (socket: SocketIO.Socket | SocketIOClient.Socket | Socket) => {
     const requestObject: RawRequestObject<T> = { requestName: requestName, id: uniqueId, payload: payload };
     socket.emit('request', requestObject);
 
+    promise.catch();
+
     return promise;
   }
 
