@@ -24,9 +24,69 @@ type RawResponseObject<T extends RequestNames> ={ id: string } & (
   { data: ResponseData<T> } | { rateLimit: RateLimitResponse }
 )
 
-export default (socket: SocketIO.Socket | SocketIOClient.Socket | Socket) => {
+type SocketInstance = SocketIO.Socket | SocketIOClient.Socket | Socket;
 
-  const getUniqueRequestId = (): string => {
+class SocketPromiseRequests {
+
+  private static _registeredInstances: Map<SocketInstance['id'], SocketPromiseRequests> = new Map();
+
+  static getInstance(socket: SocketInstance): SocketPromiseRequests {
+    if (this._registeredInstances.has(socket.id)) {
+      const instance = this._registeredInstances.get(socket.id);
+      if (instance) return instance;
+    }
+    return new SocketPromiseRequests(socket)
+  }
+
+  private _socket: SocketInstance;
+  private _requestMap: Map<string, { responseCallback: (data: ResponseData<RequestNames>) => void, rejectCallback: (rateLimitResponse: RateLimitResponse) => void }> = new Map();
+  private _attachedListeners: Map<RequestNames, { listener: ListenerCallback<RequestNames>, rateLimiter?: RateLimiter }> = new Map<RequestNames, { listener: ListenerCallback<RequestNames>, rateLimiter?: RateLimiter }>();
+
+  private constructor(socket: SocketInstance) {
+
+    this._socket = socket;
+    SocketPromiseRequests._registeredInstances.set(this._socket.id, this);
+
+    // Server listening for requests
+    this._socket.on('request', (requestObject: RawRequestObject<RequestNames>) => {
+      if (this._attachedListeners.has(requestObject.requestName)) {
+        const requestListener = this._attachedListeners.get(requestObject.requestName);
+        if (requestListener) {
+
+          const { listener, rateLimiter } = requestListener;
+          if (rateLimiter) {
+            const rateLimitResponse = rateLimiter();
+            if (rateLimitResponse.limited === true) {
+              const responseObject: RawResponseObject<RequestNames> = { id: requestObject.id, rateLimit: rateLimitResponse };
+              socket.emit('response', responseObject);
+              return;
+            }
+          }
+          
+          listener(requestObject.payload, (response: ResponseData<RequestNames>): void => {
+            const responseObject: RawResponseObject<RequestNames> = { id: requestObject.id, data: response };
+            socket.emit('response', responseObject);
+          });
+          
+        }
+      }
+    });
+
+    // Client listening to responses
+    this._socket.on('response', (responseObject: RawResponseObject<RequestNames>) => {
+      if (this._requestMap.has(responseObject.id)) {
+        const requestResponse = this._requestMap.get(responseObject.id);
+        if (requestResponse) {
+          const { responseCallback, rejectCallback } = requestResponse;
+          if ('data' in responseObject) responseCallback(responseObject.data);
+          else rejectCallback(responseObject.rateLimit);
+        }
+      }
+    })
+
+  }
+
+  private getUniqueRequestId(): string {
 
     const getRandomString = (): string => {
       const length = 64;
@@ -38,16 +98,16 @@ export default (socket: SocketIO.Socket | SocketIOClient.Socket | Socket) => {
     let uniqueString: string;
     do {
       uniqueString = getRandomString();
-    } while (requestMap.has(uniqueString))
+    } while (this._requestMap.has(uniqueString))
 
     return uniqueString;
+
   }
-  
+
   // Client making requests
-  const requestMap: Map<string, { responseCallback: (data: ResponseData<RequestNames>) => void, rejectCallback: (rateLimitResponse: RateLimitResponse) => void }> = new Map();
-  function request <T extends RequestNames>(requestName: T, payload: PayloadData<T>[0], callback: RequestCallback<T>): Promise<ResponseData<T>> // args length will be exactly 2
-  function request <T extends RequestNames>(requestName: T, ...payload: PayloadData<T>): Promise<ResponseData<T>> // spread is used to cheat optional params, but args length will be 1 as PayloadData is a tuple of length 1
-  function request <T extends RequestNames>(requestName: T, ...args: PayloadData<T> | [ PayloadData<T>[0], RequestCallback<T> ]): Promise<ResponseData<T>> {
+  request<T extends RequestNames>(requestName: T, payload: PayloadData<T>[0], callback: RequestCallback<T>): Promise<ResponseData<T>> // args length will be exactly 2
+  request<T extends RequestNames>(requestName: T, ...payload: PayloadData<T>): Promise<ResponseData<T>> // spread is used to cheat optional params, but args length will be 1 as PayloadData is a tuple of length 1
+  request<T extends RequestNames>(requestName: T, ...args: PayloadData<T> | [ PayloadData<T>[0], RequestCallback<T> ]): Promise<ResponseData<T>> {
 
     let payload: PayloadData<T>[0], callback: RequestCallback<T>;
     if (args.length === 2) {
@@ -56,7 +116,7 @@ export default (socket: SocketIO.Socket | SocketIOClient.Socket | Socket) => {
     }
     else payload = args[0]
 
-    const uniqueId: string = getUniqueRequestId();
+    const uniqueId: string = this.getUniqueRequestId();
     
     // Extract promise resolve function
     let resolvePromise: (reponse: ResponseData<T>) => void;
@@ -67,79 +127,45 @@ export default (socket: SocketIO.Socket | SocketIOClient.Socket | Socket) => {
     });
     
     // Store the request with the promise functions
-    requestMap.set(uniqueId, {
+    this._requestMap.set(uniqueId, {
       responseCallback: (data: ResponseData<T>) => {
         resolvePromise(data); // resolve promise
         if (callback) callback(data);
-        else requestMap.delete(uniqueId) // If there's no callback, it resolves the promise once and deletes the request
+        else this._requestMap.delete(uniqueId) // If there's no callback, it resolves the promise once and deletes the request
       },
       rejectCallback: (rateLimitResponse: RateLimitResponse) => {
         rejectPromise(rateLimitResponse); // reject promise
         if (callback) callback(undefined, rateLimitResponse);
-        else requestMap.delete(uniqueId) // If there's no callback, it rejects the promise once and deletes the request
+        else this._requestMap.delete(uniqueId) // If there's no callback, it rejects the promise once and deletes the request
       }
     });
 
     // Make request
     const requestObject: RawRequestObject<T> = { requestName: requestName, id: uniqueId, payload: payload };
-    socket.emit('request', requestObject);
+    this._socket.emit('request', requestObject);
 
     promise.catch(() => {});
 
     return promise;
   }
 
-  // Client listening to responses
-  socket.on('response', (responseObject: RawResponseObject<RequestNames>) => {
-    if (requestMap.has(responseObject.id)) {
-      const requestResponse = requestMap.get(responseObject.id);
-      if (requestResponse) {
-        const { responseCallback, rejectCallback } = requestResponse;
-        if ('data' in responseObject) responseCallback(responseObject.data);
-        else rejectCallback(responseObject.rateLimit);
-      }
-    }
-  })
-
   // Server attaching request listeners
-  const attachedListeners: Map<RequestNames, { listener: ListenerCallback<RequestNames>, rateLimiter?: RateLimiter }> = new Map<RequestNames, { listener: ListenerCallback<RequestNames>, rateLimiter?: RateLimiter }>();
-  function listen <T extends RequestNames>(requestName: T, listener: ListenerCallback<T>, options?: ListenerOptions) {
+  listen<T extends RequestNames>(requestName: T, listener: ListenerCallback<T>, options?: ListenerOptions) {
     let rateLimiter: RateLimiter | undefined;
     if (options) {
       const { rateLimit: rateLimitOptions } = options;
       if (rateLimitOptions) rateLimiter = rateLimitOptions ? createRateLimiter(rateLimitOptions) : undefined;
     }
-    attachedListeners.set(requestName, { listener, rateLimiter });
-  }
-
-  // Server listening for requests
-  socket.on('request', (requestObject: RawRequestObject<RequestNames>) => {
-    if (attachedListeners.has(requestObject.requestName)) {
-      const requestListener = attachedListeners.get(requestObject.requestName);
-      if (requestListener) {
-
-        const { listener, rateLimiter } = requestListener;
-        if (rateLimiter) {
-          const rateLimitResponse = rateLimiter();
-          if (rateLimitResponse.limited === true) {
-            const responseObject: RawResponseObject<RequestNames> = { id: requestObject.id, rateLimit: rateLimitResponse };
-            socket.emit('response', responseObject);
-            return;
-          }
-        }
-        
-        listener(requestObject.payload, (response: ResponseData<RequestNames>): void => {
-          const responseObject: RawResponseObject<RequestNames> = { id: requestObject.id, data: response };
-          socket.emit('response', responseObject);
-        });
-        
-      }
-    }
-  });
-
-  return {
-    request,
-    listen,
+    this._attachedListeners.set(requestName, { listener, rateLimiter });
   }
 
 }
+
+export default (socket: SocketIO.Socket | SocketIOClient.Socket | Socket): SocketPromiseRequests => {
+  return SocketPromiseRequests.getInstance(socket);
+}
+
+export type {
+  SocketPromiseRequests,
+  RateLimitOptions, RateLimiter, RateLimitResponse
+};
