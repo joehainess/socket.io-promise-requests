@@ -36,7 +36,7 @@ class SocketPromiseServer {
 
     this._server = server;
 
-    this._server.use((socket: Socket) => {
+    this._server.use((socket: Socket, next) => {
             
       const getIp = (): string => {
         const headers = socket.request.headers;
@@ -70,6 +70,8 @@ class SocketPromiseServer {
           }
         }
       });
+
+      next();
 
     })
 
